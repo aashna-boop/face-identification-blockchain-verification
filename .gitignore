@@ -1,0 +1,30 @@
+## Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+## Secrets
+.env
+
+## Node / Hardhat
+node_modules/
+artifacts/
+cache/
+blockchain/artifacts/
+blockchain/cache/
+blockchain/deployment.json
+
+## Runtime data (per-run evidence & the demo photo you use)
+output/*.json
+sample_data/*
+!output/.gitkeep
+!sample_data/.gitkeep
+
+## OS
+Thumbs.db
+.DS_Store
+
+## Local scratch logs from setup/testing
+*.log
+

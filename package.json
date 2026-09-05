@@ -1,0 +1,9 @@
+{
+  "name": "hhgoa3-blockchain",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local Hardhat network + PostRegistry contract for the face-ID/blockchain-verification pipeline.",
+  "devDependencies": {
+    "hardhat": "^2.22.0"
+  }
+}

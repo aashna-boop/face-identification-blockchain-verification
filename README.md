@@ -151,6 +151,24 @@ python pipeline.py --verify output/evidence_20260905T120000Z.json
 - **Not exhaustive identity verification.** A face-embedding match is
   evidence, not proof, of identity — it's presented here as "verified
   within this pipeline's threshold," not a legal or forensic guarantee.
+  Facenet512's own published benchmark accuracy (~99.65% on the LFW dataset)
+  is measured on clean, frontal photo pairs, not compressed/filtered/cropped
+  social-media thumbnails — real-world accuracy on that harder input is
+  unmeasured and almost certainly lower.
+- **First match wins, not best match.** `pipeline.py` stops at the first
+  candidate whose embedding clears the threshold, in social-domain-first
+  order — it does not compare every candidate and pick the globally closest
+  one.
+- **Verification uses the search engine's cached thumbnail, not the live
+  post image.** If Lens's thumbnail is stale, watermarked, or cropped
+  differently from the actual post, the embedding comparison can diverge
+  from what a human looking at the real post would conclude.
+- **Single-face assumption.** `encode_face` picks the most confident face
+  in the input photo; a group photo will be encoded using whichever face
+  DeepFace is most confident about, not necessarily the intended one.
+- **No liveness/anti-spoof check.** The pipeline can't distinguish a real
+  photo from a photo-of-a-photo or an AI-generated face — anything that
+  produces a detectable face embedding is accepted as input.
 - **Scope, by design.** As covered above, this is built and demoed for
   self-search only; it is not hardened or intended for searching third
   parties' photos without their consent.

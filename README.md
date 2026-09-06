@@ -83,7 +83,7 @@ don't need to change at all.
 
 ```bash
 python -m venv .venv
-.venv\Scripts\activate        # Windows
+.venv\Scripts\activate         # Windows
 pip install -r requirements.txt
 ```
 

@@ -37,12 +37,37 @@ def _hr(title: str) -> None:
     print("=" * 70)
 
 
+def _print_candidates(candidates) -> None:
+    for i, c in enumerate(candidates, 1):
+        tag = "[social]" if c.is_social else "[other] "
+        print(f"  {i:>2}. {tag} {c.title[:60]!r} -> {c.link}")
+
+
+def _find_verified_match(original, candidates):
+    """Check candidates in order, return (candidate, match_result, checked_count)
+    for the first one whose face embedding actually matches, or (None, None,
+    checked_count) if none did. Never fabricates a match.
+    """
+    from verification.face_match import verify_candidate
+
+    checked = 0
+    for c in candidates:
+        if not c.thumbnail:
+            continue
+        checked += 1
+        result = verify_candidate(original, c.thumbnail)
+        status = "MATCH" if result.is_match else "no match"
+        detail = result.error or f"distance={result.distance:.4f} (threshold {result.threshold})"
+        print(f"  - {c.link}\n      {status} — {detail}")
+        if result.is_match:
+            return c, result, checked
+    return None, None, checked
+
+
 def run_full_pipeline(image_path: str, top_k: int, tamper_demo: bool) -> None:
     from face_id.detector import encode_face
     from web_search.image_host import upload_image
-    from web_search.reverse_search import search_by_image_url
-    from verification.face_match import verify_candidate
-    from blockchain.registry import register_evidence, verify_evidence
+    from web_search import reverse_search, bing_search
 
     _hr("STAGE 1 — Face detection & encoding")
     original = encode_face(image_path)
@@ -57,49 +82,57 @@ def run_full_pipeline(image_path: str, top_k: int, tamper_demo: bool) -> None:
     print(f"Temporary public URL: {public_url}")
 
     print(f"Searching for visual matches (top {top_k} considered)...")
-    candidates = search_by_image_url(public_url, limit=top_k)
-    if not candidates:
-        print("No visual matches returned by the search API. Stopping — "
-              "nothing to verify or anchor on-chain.")
+    candidates = reverse_search.search_by_image_url(public_url, limit=top_k)
+    engine_used = "google_lens"
+    total_checked = 0
+
+    if candidates:
+        _print_candidates(candidates)
+        _hr("STAGE 2.5 — Re-verifying candidates against the original face")
+        candidate, match, checked = _find_verified_match(original, candidates)
+        total_checked += checked
+    else:
+        print("No visual matches returned by Google Lens.")
+        candidate = match = None
+
+    if candidate is None:
+        if bing_search.is_configured():
+            _hr("STAGE 2 (fallback) — Bing Visual Search")
+            print("Google Lens found no verified match; trying Bing's independent "
+                  "image index as a second opinion...")
+            bing_candidates = bing_search.search_by_image_file(image_path, limit=top_k)
+            if bing_candidates:
+                _print_candidates(bing_candidates)
+                _hr("STAGE 2.5 (fallback) — Re-verifying Bing candidates against the original face")
+                candidate, match, checked = _find_verified_match(original, bing_candidates)
+                total_checked += checked
+                if candidate is not None:
+                    engine_used = "bing_visual_search"
+            else:
+                print("No visual matches returned by Bing Visual Search either.")
+        else:
+            print("\n(No BING_VISUAL_SEARCH_API_KEY configured, so no fallback search "
+                  "was attempted — see .env.example.)")
+
+    if candidate is None:
+        print(f"\nChecked {total_checked} candidate image(s) across all configured "
+              "search backends; none verified as the same face. Not fabricating a "
+              "match — stopping here. Try a clearer input photo, increase --top-k, "
+              "or configure BING_VISUAL_SEARCH_API_KEY for a second search backend.")
         return
-
-    for i, c in enumerate(candidates, 1):
-        tag = "[social]" if c.is_social else "[other] "
-        print(f"  {i:>2}. {tag} {c.title[:60]!r} -> {c.link}")
-
-    _hr("STAGE 2.5 — Re-verifying candidates against the original face")
-    verified = None
-    checked = 0
-    for c in candidates:
-        if not c.thumbnail:
-            continue
-        checked += 1
-        result = verify_candidate(original, c.thumbnail)
-        status = "MATCH" if result.is_match else "no match"
-        detail = result.error or f"distance={result.distance:.4f} (threshold {result.threshold})"
-        print(f"  - {c.link}\n      {status} — {detail}")
-        if result.is_match:
-            verified = (c, result)
-            break
-
-    if verified is None:
-        print(f"\nChecked {checked} candidate image(s); none verified as the same "
-              "face. Not fabricating a match — stopping here. Try a clearer "
-              "input photo or increase --top-k.")
-        return
-
-    candidate, match = verified
     _hr("Matched post found")
     print(f"URL      : {candidate.link}")
     print(f"Source   : {candidate.source}")
     print(f"Title    : {candidate.title}")
     print(f"Distance : {match.distance:.4f} (<= {match.threshold} threshold)")
+    print(f"Found via: {engine_used}")
 
     evidence = {
         "post_url": candidate.link,
         "post_source": candidate.source,
         "post_title": candidate.title,
         "post_thumbnail": candidate.thumbnail,
+        "search_engine": engine_used,
         "match_distance": round(match.distance, 6),
         "match_threshold": match.threshold,
         "face_model": original.model,

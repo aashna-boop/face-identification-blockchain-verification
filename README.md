@@ -48,7 +48,7 @@ without their consent.**
 | 1. Face ID | [`face_id/detector.py`](face_id/detector.py) | Detects the face and computes a Facenet512 embedding via [DeepFace](https://github.com/serengil/deepface). |
 | 2. Web search | [`web_search/reverse_search.py`](web_search/reverse_search.py) | Calls SerpApi's `google_lens` engine (a real, live reverse-image search) and ranks results, preferring known social-media domains. |
 | — hosting | [`web_search/image_host.py`](web_search/image_host.py) | Briefly uploads the photo to imgbb (self-expiring) since Lens needs a public URL. |
-| 2 (fallback) | [`web_search/bing_search.py`](web_search/bing_search.py) | If Lens finds no verified match, tries Bing Visual Search — a different, independently-crawled index that sometimes has a post Google hasn't indexed (e.g. lower-engagement accounts). Only runs if `BING_VISUAL_SEARCH_API_KEY` is set; skipped otherwise. |
+| 2 (fallback) | [`web_search/yandex_search.py`](web_search/yandex_search.py) | If Lens finds no verified match, tries SerpApi's `yandex_images` engine — a different, independently-crawled index that sometimes has a post Google hasn't indexed (e.g. lower-engagement accounts). Reuses the same `SERPAPI_API_KEY`, no separate signup. (Bing Visual Search was the original fallback here, but Microsoft fully retired the Bing Search APIs on August 11, 2025.) |
 | 2.5 Verification | [`verification/face_match.py`](verification/face_match.py) | Downloads each candidate image and re-runs stage 1's face encoding on it, comparing cosine distance to the original — the "match" is confirmed by the face pipeline itself, not just Lens's visual similarity score. |
 | 3. Blockchain | [`blockchain/`](blockchain/) | Hashes the matched post's metadata (SHA-256), stores the hash + source URL on-chain via the `PostRegistry` Solidity contract, on a local Hardhat Ethereum node. |
 | Orchestration | [`pipeline.py`](pipeline.py) | Runs all of the above end-to-end and prints a readable trace for the demo recording. |
@@ -106,8 +106,7 @@ copy .env.example .env
 
 Fill in `.env`:
 - `IMGBB_API_KEY` — free, no card, from https://api.imgbb.com/
-- `SERPAPI_API_KEY` — free plan (100 searches/month, no card), from https://serpapi.com/manage-api-key
-- `BING_VISUAL_SEARCH_API_KEY` — optional. Free F0 tier (1,000 transactions/month) from a Bing Search v7 resource at https://portal.azure.com/. Only used as a fallback if Google Lens finds no verified match; leave blank to skip it.
+- `SERPAPI_API_KEY` — free plan (100 searches/month, no card), from https://serpapi.com/manage-api-key. Powers both the primary Google Lens search and the Yandex fallback (no separate key needed for the fallback).
 
 ## Running it
 
@@ -143,11 +142,11 @@ python pipeline.py --verify output/evidence_20260905T120000Z.json
   negative (real match missed) more easily than a false positive.
 - **Reverse-image search coverage.** Google Lens (via SerpApi) only surfaces
   what Google has indexed; a genuinely obscure, very recent, or
-  low-engagement post may not appear even if it exists. The optional Bing
-  Visual Search fallback (`web_search/bing_search.py`) helps by checking a
-  second, independently-crawled index, but it's still bounded by whatever
-  Bing itself has indexed — no reverse-image search can surface a post that
-  no crawler has ever picked up. That gap is deliberate: closing it fully
+  low-engagement post may not appear even if it exists. The Yandex fallback
+  (`web_search/yandex_search.py`) helps by checking a second,
+  independently-crawled index, but it's still bounded by whatever Yandex
+  itself has indexed — no reverse-image search can surface a post that no
+  crawler has ever picked up. That gap is deliberate: closing it fully
   would mean building our own bulk social-media scraper/face-index (the
   Clearview AI/PimEyes approach), which this project intentionally avoids —
   see Ethics & scope above.

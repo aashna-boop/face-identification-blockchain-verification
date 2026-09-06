@@ -67,7 +67,7 @@ def _find_verified_match(original, candidates):
 def run_full_pipeline(image_path: str, top_k: int, tamper_demo: bool) -> None:
     from face_id.detector import encode_face
     from web_search.image_host import upload_image
-    from web_search import reverse_search, bing_search
+    from web_search import reverse_search, yandex_search
 
     _hr("STAGE 1 — Face detection & encoding")
     original = encode_face(image_path)
@@ -96,29 +96,27 @@ def run_full_pipeline(image_path: str, top_k: int, tamper_demo: bool) -> None:
         candidate = match = None
 
     if candidate is None:
-        if bing_search.is_configured():
-            _hr("STAGE 2 (fallback) — Bing Visual Search")
-            print("Google Lens found no verified match; trying Bing's independent "
-                  "image index as a second opinion...")
-            bing_candidates = bing_search.search_by_image_file(image_path, limit=top_k)
-            if bing_candidates:
-                _print_candidates(bing_candidates)
-                _hr("STAGE 2.5 (fallback) — Re-verifying Bing candidates against the original face")
-                candidate, match, checked = _find_verified_match(original, bing_candidates)
+        if yandex_search.is_configured():
+            _hr("STAGE 2 (fallback) — Yandex reverse-image search")
+            print("Google Lens found no verified match; trying Yandex's independent "
+                  "image index as a second opinion (same SerpApi key, different engine)...")
+            yandex_candidates = yandex_search.search_by_image_url(public_url, limit=top_k)
+            if yandex_candidates:
+                _print_candidates(yandex_candidates)
+                _hr("STAGE 2.5 (fallback) — Re-verifying Yandex candidates against the original face")
+                candidate, match, checked = _find_verified_match(original, yandex_candidates)
                 total_checked += checked
                 if candidate is not None:
-                    engine_used = "bing_visual_search"
+                    engine_used = "yandex_images"
             else:
-                print("No visual matches returned by Bing Visual Search either.")
+                print("No visual matches returned by Yandex either.")
         else:
-            print("\n(No BING_VISUAL_SEARCH_API_KEY configured, so no fallback search "
-                  "was attempted — see .env.example.)")
+            print("\n(SERPAPI_API_KEY not set, so no fallback search was attempted.)")
 
     if candidate is None:
-        print(f"\nChecked {total_checked} candidate image(s) across all configured "
-              "search backends; none verified as the same face. Not fabricating a "
-              "match — stopping here. Try a clearer input photo, increase --top-k, "
-              "or configure BING_VISUAL_SEARCH_API_KEY for a second search backend.")
+        print(f"\nChecked {total_checked} candidate image(s) across both Google Lens "
+              "and Yandex; none verified as the same face. Not fabricating a match — "
+              "stopping here. Try a clearer input photo or increase --top-k.")
         return
     _hr("Matched post found")
     print(f"URL      : {candidate.link}")

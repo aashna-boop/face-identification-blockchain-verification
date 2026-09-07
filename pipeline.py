@@ -30,6 +30,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Windows consoles often default stdout/stderr to a legacy codepage (cp1252)
+# that can't encode some characters used below (—, ✓-style marks, etc.),
+# which crashes print() mid-run instead of just looking wrong. Force UTF-8
+# and never raise on an unencodable character.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 
 def _hr(title: str) -> None:
     print("\n" + "=" * 70)
@@ -68,6 +76,7 @@ def run_full_pipeline(image_path: str, top_k: int, tamper_demo: bool) -> None:
     from face_id.detector import encode_face
     from web_search.image_host import upload_image
     from web_search import reverse_search, yandex_search
+    from blockchain.registry import register_evidence, verify_evidence
 
     _hr("STAGE 1 — Face detection & encoding")
     original = encode_face(image_path)
@@ -161,9 +170,9 @@ def run_full_pipeline(image_path: str, top_k: int, tamper_demo: bool) -> None:
     print(f"Submitter  : {check['submitter']}")
     print(f"Source URL : {check['source_url']}")
     if check["on_chain"]:
-        print("\n✅ VERIFIED — evidence file matches the on-chain record.")
+        print("\n[VERIFIED] Evidence file matches the on-chain record.")
     else:
-        print("\n⚠️  Not found on-chain — something is inconsistent.")
+        print("\n[WARNING] Not found on-chain — something is inconsistent.")
 
     if tamper_demo:
         _hr("BONUS — tamper-evidence demo")
@@ -173,7 +182,7 @@ def run_full_pipeline(image_path: str, top_k: int, tamper_demo: bool) -> None:
         tampered_check = verify_evidence(tampered)
         print(f"On-chain? : {tampered_check['on_chain']}")
         if not tampered_check["on_chain"]:
-            print("❌ As expected: the tampered content hashes differently and "
+            print("[AS EXPECTED] The tampered content hashes differently and "
                   "matches no on-chain record — this is what tamper-evidence looks like.")
 
 
@@ -186,7 +195,7 @@ def run_verify_only(evidence_path: str) -> None:
     _hr(f"Re-verifying {evidence_path} against the chain")
     check = verify_evidence(evidence)
     print(json.dumps(check, indent=2))
-    print("\n✅ VERIFIED" if check["on_chain"] else "\n❌ NOT FOUND ON-CHAIN (missing or tampered)")
+    print("\n[VERIFIED]" if check["on_chain"] else "\n[NOT FOUND ON-CHAIN] (missing or tampered)")
 
 
 def main() -> None:

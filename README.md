@@ -1,82 +1,93 @@
 # Face Identification & Blockchain Verification
 
-Built for HH Goa 2026 Shortlisting Task 3.
+*Built for HH Goa 2026 — Task 3*
 
-A pipeline that takes a face photo, genuinely searches the web for a matching
-social media post, re-verifies that the match is actually the same face, and
-anchors a tamper-evident fingerprint of the discovered post on a local
-blockchain — with a script that later re-verifies the saved evidence against
-the on-chain record.
+> **TL;DR:** Take a face photo → search the open web for a matching social
+> post → make the face pipeline itself re-check that the match is real →
+> hash the evidence → anchor that hash on a local blockchain → prove later
+> that the evidence hasn't been tampered with. Every step is designed to be
+> **self-search only**. This is not, and will never become, a Clearview AI
+> clone.
 
 ```
-face photo → face encoding (DeepFace)
-           → reverse-image search (SerpApi Google Lens)
-           → re-verify candidate is the same face (cosine distance on embeddings)
-           → hash the matched post's evidence (SHA-256)
-           → register the hash on a local Ethereum chain (Hardhat + Solidity)
-           → re-verify the saved evidence against the on-chain record
+face photo ──▶ face encoding (DeepFace, Facenet512)
+           ──▶ reverse-image search (SerpApi Google Lens)
+           ──▶ re-verify candidate is the same face (cosine distance)
+           ──▶ hash the matched post's evidence (SHA-256)
+           ──▶ anchor the hash on a local Ethereum chain (Hardhat + Solidity)
+           ──▶ re-verify saved evidence against the on-chain record, anytime later
 ```
 
-## Ethics & scope — read this first
+---
 
-Requirement #2 of the task ("use a face to find someone's social media") is,
-at face value, the mechanism behind facial-recognition search tools like
-Clearview AI / PimEyes, which have been widely criticized for enabling
-stalking and doxxing. This project is built and demonstrated **only against
-the author's own photo and the author's own public social media post** —
-never against a stranger's photo without consent.
+## Why this README leads with ethics, not features
 
-Practical guardrails baked into the code, not just this paragraph:
+Task 3's brief — "use a face to find someone's social media" — describes,
+almost word for word, the mechanism behind **Clearview AI** and **PimEyes**:
+tools that scrape billions of faces without consent and let anyone with an
+account unmask a stranger from a single photo. Clearview has been fined by
+multiple European data protection authorities and banned from selling to
+most U.S. companies for exactly this reason — it turns a technique with
+legitimate uses (verifying *your own* identity, reuniting *your own*
+accounts, detecting deepfakes of *yourself*) into a mass surveillance and
+stalking tool the moment you point it at someone else without their
+knowledge.
 
-- `pipeline.py` refuses to run the full pipeline unless you pass `--consent`,
-  a deliberate confirmation that you have the right to search for and anchor
-  this particular photo.
-- The photo is hosted temporarily (auto-expires, default 10 minutes) via
-  imgbb only for the duration of the search call — it isn't kept anywhere
-  public afterwards.
-- The pipeline never fabricates a "match." If no candidate's face embedding
-  actually matches the input within the model's threshold, it says so and
-  stops rather than anchoring a guess.
+So the build brief here was: **implement the mechanism, refuse the misuse.**
+Concretely, that means:
 
-**If you fork or reuse this code: don't point it at other people's photos
-without their consent.**
+| Clearview AI / PimEyes | This project |
+|---|---|
+| Scrapes billions of faces from the entire internet into a private index, without consent | Runs a live search *at query time* against a search engine's existing public index — nothing is scraped or stored in bulk |
+| Works on anyone's photo, no questions asked | Refuses to run (`pipeline.py` exits) unless you pass `--consent`, an explicit acknowledgment that you have the right to search this photo |
+| Sold to police, ICE, retailers, private individuals to identify strangers | Not sold to anyone; demoed and documented for **self-verification only** |
+| Keeps your uploaded photo indefinitely | The query photo is hosted only long enough for the reverse-image search API to fetch it (auto-expires, default 10 minutes), then it's gone |
+| Presents a "match" with confidence you can't audit | If no candidate clears the face-embedding threshold, the pipeline says so and **stops** — it never fabricates a match to make the demo look better |
+
+If you fork this: **don't point it at someone else's photo without their
+consent.** The guardrails below are code, not just this paragraph — but they
+can obviously be stripped out by anyone determined to misuse this. Please
+don't be that person.
+
+---
 
 ## Architecture
 
-| Stage | Module | What it does |
+| Stage | Module | What it actually does |
 |---|---|---|
-| 1. Face ID | [`face_id/detector.py`](face_id/detector.py) | Detects the face and computes a Facenet512 embedding via [DeepFace](https://github.com/serengil/deepface). |
-| 2. Web search | [`web_search/reverse_search.py`](web_search/reverse_search.py) | Calls SerpApi's `google_lens` engine (a real, live reverse-image search) and ranks results, preferring known social-media domains. |
-| — hosting | [`web_search/image_host.py`](web_search/image_host.py) | Briefly uploads the photo to imgbb (self-expiring) since Lens needs a public URL. |
-| 2 (fallback) | [`web_search/yandex_search.py`](web_search/yandex_search.py) | If Lens finds no verified match, tries SerpApi's `yandex_images` engine — a different, independently-crawled index that sometimes has a post Google hasn't indexed (e.g. lower-engagement accounts). Reuses the same `SERPAPI_API_KEY`, no separate signup. (Bing Visual Search was the original fallback here, but Microsoft fully retired the Bing Search APIs on August 11, 2025.) |
-| 2.5 Verification | [`verification/face_match.py`](verification/face_match.py) | Downloads each candidate image and re-runs stage 1's face encoding on it, comparing cosine distance to the original — the "match" is confirmed by the face pipeline itself, not just Lens's visual similarity score. |
-| 3. Blockchain | [`blockchain/`](blockchain/) | Hashes the matched post's metadata (SHA-256), stores the hash + source URL on-chain via the `PostRegistry` Solidity contract, on a local Hardhat Ethereum node. |
-| Orchestration | [`pipeline.py`](pipeline.py) | Runs all of the above end-to-end and prints a readable trace for the demo recording. |
+| 1. Face ID | `face_id/detector.py` | Detects the face and computes a Facenet512 embedding via [DeepFace](https://github.com/serengil/deepface). |
+| 2. Web search | `web_search/reverse_search.py` | Calls SerpApi's `google_lens` engine — a real, live reverse-image search — and ranks results, preferring known social-media domains. |
+| 2. Hosting | `web_search/image_host.py` | Briefly uploads the query photo to imgbb (self-expiring) since Lens needs a public URL to search against. |
+| 2. Fallback | `web_search/yandex_search.py` | If Lens finds no verified match, tries SerpApi's `yandex_images` engine — an independently-crawled index that occasionally has posts Google hasn't indexed. Reuses the same `SERPAPI_API_KEY`. (Bing Visual Search was the original fallback; Microsoft fully retired the Bing Search APIs on August 11, 2025.) |
+| 2.5 Verification | `verification/face_match.py` | Downloads each candidate image and re-runs stage 1's face encoding on *that* image, comparing cosine distance to the original. The "match" is confirmed by the face pipeline itself — not just Lens's visual-similarity score. |
+| 3. Blockchain | `blockchain/` | Hashes the matched post's evidence (SHA-256) and writes the hash + source URL on-chain via the `PostRegistry` Solidity contract, on a local Hardhat Ethereum node. |
+| Orchestration | `pipeline.py` | Runs all of the above end-to-end with a readable trace, and handles later re-verification. |
 
-### Why a hash goes on-chain, not the whole post
+### Why only a hash goes on-chain
 
-The full "discovered post" evidence (URL, title, source, thumbnail, match
-distance, timestamp) is saved off-chain as JSON in `output/`. Only its
-SHA-256 hash (plus the source URL, for human context) is written on-chain.
-Re-verification means recomputing the hash of the saved JSON and checking it
-against `PostRegistry.getRecord(hash)`: if the JSON was altered even slightly
-afterwards, the recomputed hash won't match anything on-chain — that
-mismatch *is* the tamper-evidence. `pipeline.py --tamper-demo` shows this
-directly by mutating a copy of the evidence and re-verifying it live.
+The full evidence bundle (URL, title, source, thumbnail, match distance,
+timestamp) is saved off-chain as JSON in `output/`. Only its SHA-256 hash
+(plus the source URL for human context) goes on-chain. To re-verify: recompute
+the hash of the saved JSON and check it against `PostRegistry.getRecord(hash)`.
+If the JSON was altered afterward, even by one byte, the recomputed hash
+won't match anything on-chain — that mismatch *is* the tamper-evidence.
+Run `python pipeline.py --tamper-demo` to see this live: it mutates a copy of
+the evidence and shows re-verification fail in real time.
 
-## Which blockchain
+### Which blockchain, and why
 
-A **local Ethereum node run via Hardhat** (`npx hardhat node`), which is the
-"local/simulated chain" option the task explicitly allows. This keeps the
-demo fully self-contained (no wallet, no testnet faucet, no API keys for the
-chain itself) while still being a real EVM executing a real Solidity
-contract — `PostRegistry.sol` — with genuine transactions, block numbers,
-and an event log, just on a private chain instead of a public one.
+A **local Ethereum node run via Hardhat** (`npx hardhat node`) — the
+local/simulated chain option the task explicitly allows. That keeps the demo
+fully self-contained (no wallet, no testnet faucet, no chain-side API keys)
+while still being a real EVM executing a real Solidity contract
+(`PostRegistry.sol`) with genuine transactions, block numbers, and an event
+log — just on a private chain instead of a public one.
 
-To move this to a public testnet instead, only `blockchain/chain.py` needs
-to change: point `CHAIN_RPC_URL` (in `.env`) at a provider like Alchemy/
-Infura and fund an account from a faucet; `registry.py` and `pipeline.py`
-don't need to change at all.
+To move to a public testnet instead: point `CHAIN_RPC_URL` in `.env` at a
+provider like Alchemy or Infura and fund an account from a faucet.
+`registry.py` and `pipeline.py` need zero changes.
+
+---
 
 ## Setup
 
@@ -88,8 +99,8 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-The first run of DeepFace downloads its model weights (~100 MB) from GitHub
-automatically — needs internet access once.
+DeepFace downloads its model weights (~100 MB) on first run — needs internet
+access once.
 
 ### 2. Blockchain (Node.js + Hardhat)
 
@@ -105,8 +116,13 @@ copy .env.example .env
 ```
 
 Fill in `.env`:
+
 - `IMGBB_API_KEY` — free, no card, from https://api.imgbb.com/
-- `SERPAPI_API_KEY` — free plan (100 searches/month, no card), from https://serpapi.com/manage-api-key. Powers both the primary Google Lens search and the Yandex fallback (no separate key needed for the fallback).
+- `SERPAPI_API_KEY` — free plan (100 searches/month, no card), from
+  https://serpapi.com/manage-api-key. Powers both the primary Google Lens
+  search and the Yandex fallback — no separate key needed.
+
+---
 
 ## Running it
 
@@ -116,67 +132,62 @@ Fill in `.env`:
 npx hardhat node
 ```
 
-**Terminal 2** — run the full pipeline against your own photo:
+**Terminal 2** — run the full pipeline against **your own** photo:
 
 ```bash
 python pipeline.py --image sample_data/your_photo.jpg --consent
 ```
 
-Add `--tamper-demo` to also see a mutated record fail re-verification in the
+Add `--tamper-demo` to watch a mutated record fail re-verification in the
 same run.
 
 **Re-verify later**, independent of the search step, against whichever
-evidence file the run above saved:
+evidence file was saved:
 
 ```bash
 python pipeline.py --verify output/evidence_20260905T120000Z.json
 ```
+
+---
 
 ## Known limitations
 
 - **Free-tier quotas.** SerpApi's free plan is 100 searches/month; imgbb's
   free tier is generous but not unlimited.
 - **Face-match threshold is heuristic.** Facenet512's cosine-distance
-  threshold (0.30) is DeepFace's published default, not tuned for this
-  specific task — a low-quality candidate thumbnail can produce a false
-  negative (real match missed) more easily than a false positive.
-- **Reverse-image search coverage.** Google Lens (via SerpApi) only surfaces
-  what Google has indexed; a genuinely obscure, very recent, or
-  low-engagement post may not appear even if it exists. The Yandex fallback
-  (`web_search/yandex_search.py`) helps by checking a second,
-  independently-crawled index, but it's still bounded by whatever Yandex
-  itself has indexed — no reverse-image search can surface a post that no
-  crawler has ever picked up. That gap is deliberate: closing it fully
-  would mean building our own bulk social-media scraper/face-index (the
-  Clearview AI/PimEyes approach), which this project intentionally avoids —
-  see Ethics & scope above.
-- **Chain state resets with the node.** Since `npx hardhat node` runs an
-  in-memory chain, stopping it wipes all registered records; the cached
-  contract address in `blockchain/deployment.json` is auto-redeployed if the
-  node has restarted. This is fine for demoing the mechanism, but it's not
-  a persistent ledger across sessions unless you point `CHAIN_RPC_URL` at a
-  long-running node or public testnet instead.
-- **Not exhaustive identity verification.** A face-embedding match is
-  evidence, not proof, of identity — it's presented here as "verified
-  within this pipeline's threshold," not a legal or forensic guarantee.
-  Facenet512's own published benchmark accuracy (~99.65% on the LFW dataset)
-  is measured on clean, frontal photo pairs, not compressed/filtered/cropped
-  social-media thumbnails — real-world accuracy on that harder input is
-  unmeasured and almost certainly lower.
-- **First match wins, not best match.** `pipeline.py` stops at the first
-  candidate whose embedding clears the threshold, in social-domain-first
-  order — it does not compare every candidate and pick the globally closest
-  one.
-- **Verification uses the search engine's cached thumbnail, not the live
-  post image.** If Lens's thumbnail is stale, watermarked, or cropped
-  differently from the actual post, the embedding comparison can diverge
-  from what a human looking at the real post would conclude.
-- **Single-face assumption.** `encode_face` picks the most confident face
-  in the input photo; a group photo will be encoded using whichever face
-  DeepFace is most confident about, not necessarily the intended one.
-- **No liveness/anti-spoof check.** The pipeline can't distinguish a real
-  photo from a photo-of-a-photo or an AI-generated face — anything that
-  produces a detectable face embedding is accepted as input.
-- **Scope, by design.** As covered above, this is built and demoed for
-  self-search only; it is not hardened or intended for searching third
-  parties' photos without their consent.
+  threshold (0.30) is DeepFace's published default, not tuned for this task —
+  a low-quality candidate thumbnail is more likely to cause a false negative
+  (real match missed) than a false positive.
+- **Search coverage is bounded on purpose.** Google Lens and the Yandex
+  fallback only surface what those engines have already indexed. A genuinely
+  obscure or very recent post may not appear even if it exists. Closing that
+  gap completely would mean building our own bulk face-indexing scraper —
+  the Clearview/PimEyes approach — which this project deliberately avoids.
+- **Chain state resets with the node.** `npx hardhat node` runs an in-memory
+  chain; stopping it wipes all registered records. `blockchain/deployment.json`
+  auto-redeploys the contract if the node has restarted. Fine for a demo, not
+  a persistent ledger unless you point at a long-running node or public testnet.
+- **A face match is evidence, not proof.** Facenet512's own benchmark accuracy
+  (~99.65% on LFW) is measured on clean, frontal photo pairs — not compressed,
+  filtered, or cropped social-media thumbnails. Real-world accuracy on that
+  harder input is unmeasured and likely lower.
+- **First match wins, not best match.** The pipeline stops at the first
+  candidate that clears the threshold, in social-domain-first order — it
+  doesn't compare every candidate and pick the globally closest one.
+- **Verification uses the search engine's cached thumbnail**, not the live
+  post image — a stale or differently-cropped thumbnail can make the
+  embedding comparison diverge from what a human would conclude.
+- **Single-face assumption.** `encode_face` picks the most confident face in
+  the input photo; a group photo may not encode the face you intended.
+- **No liveness/anti-spoof check.** The pipeline can't tell a real photo from
+  a photo-of-a-photo or an AI-generated face.
+- **Scope, by design.** This is built and demoed for **self-search only**. It
+  is not hardened, tested, or intended for searching third parties' photos
+  without their consent — see *Why this README leads with ethics* above.
+
+---
+
+## License
+
+MIT. See `LICENSE`. The license covers the code, not permission to use it
+against people who haven't agreed to be searched.
